@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ronap-green: #2d6a4f;
+  --ronap-green-light: #40916c;
+  --ronap-green-dark: #1b4332;
+  --ronap-cream: #f5f0e1;
+  --ronap-gold: #d4a843;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: #f8fafc;
+}
+
+.btn-primary {
+  @apply bg-ronap-green hover:bg-ronap-green-dark text-white font-semibold 
+         py-3 px-6 rounded-lg transition-all duration-200 
+         shadow-md hover:shadow-lg active:scale-[0.98];
+}
+
+.btn-primary:disabled {
+  @apply bg-gray-400 cursor-not-allowed shadow-none active:scale-100;
+}
+
+.card {
+  @apply bg-white rounded-xl shadow-md border border-gray-100 p-6;
+}
+
+.input-field {
+  @apply w-full px-4 py-2.5 border border-gray-300 rounded-lg 
+         focus:ring-2 focus:ring-ronap-green focus:border-ronap-green 
+         outline-none transition-all duration-200;
+}
+
+.label {
+  @apply block text-sm font-medium text-gray-700 mb-1.5;
+}

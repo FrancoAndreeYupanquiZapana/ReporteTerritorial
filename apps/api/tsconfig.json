@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "declaration": false,
+    "declarationMap": false,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@ronap/types": ["../../packages/types"]
+    }
+  },
+  "include": ["src/**/*.ts", "../../packages/types/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

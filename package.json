@@ -1,0 +1,17 @@
+{
+  "name": "reporte-territorial-ronap",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sistema de generación de Fichas de Reporte Territorial - RONAP",
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"pnpm --filter @ronap/api dev\" \"pnpm --filter @ronap/web dev\"",
+    "dev:web": "pnpm --filter @ronap/web dev",
+    "dev:api": "pnpm --filter @ronap/api dev",
+    "build": "pnpm --filter @ronap/types build && pnpm --filter @ronap/web build && pnpm --filter @ronap/api build",
+    "lint": "pnpm -r lint",
+    "clean": "pnpm -r exec rm -rf node_modules .next dist"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5"
+  }
+}

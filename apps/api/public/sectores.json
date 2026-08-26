@@ -1,0 +1,39 @@
+{
+  "departamento": "Madre de Dios",
+  "provincias": {
+    "Tambopata": {
+      "distrito": "Las Piedras",
+      "sectores": [
+        "Monterrey",
+        "Bajo Monterrey",
+        "Bajo Alegría",
+        "Bajo Alegría",
+        "Alegria",
+        "Mávila",
+        "Mavila",
+        "Palma Real",
+        "Qda. Palma Real Chico",
+        "Qda. Alto Mercedes",
+        "Qda.Alto Mercedez",
+        "Qda.Alto Mercedes",
+        "Maranguape",
+        "Miraflores",
+        "Pariamanu",
+        "Varsovia"
+      ]
+    },
+    "Tahuamano": {
+      "distrito": "Tahuamano",
+      "sectores": [
+        "Alerta",
+        "La Novia",
+        "Villa Rocío",
+        "Villa Rocio",
+        "Villa Rocío",
+        "San Pedro",
+        "Qda. Cocama",
+        "Qda. Cocama Alerta"
+      ]
+    }
+  }
+}
