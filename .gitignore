@@ -1,6 +1,7 @@
 node_modules/
 .next/
 dist/
+docs/
 .env
 .env.local
 .env.production
