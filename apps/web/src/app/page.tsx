@@ -89,7 +89,7 @@ export default function Home() {
     a.download = archivo.nombreArchivo;
     a.click();
     URL.revokeObjectURL(url);
-    setArchivosPendientes(prev => prev.filter(f => f.fecha !== archivo.fecha));
+    setArchivosPendientes(prev => (prev ?? []).filter(f => f.fecha !== archivo.fecha));
   };
 
   return (
