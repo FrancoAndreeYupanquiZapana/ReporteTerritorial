@@ -12,7 +12,7 @@ export default function Home() {
   const [cargando, setCargando] = useState(false);
   const [cargandoSocios, setCargandoSocios] = useState(true);
   const [resultado, setResultado] = useState<GenerarReporteResponse | null>(null);
-  const [archivosPendientes, setArchivosPendientes] = useState<GenerarReporteResponse['archivos']>([]);
+  const [archivosPendientes, setArchivosPendientes] = useState<NonNullable<GenerarReporteResponse['archivos']>>([]);
   const [error, setError] = useState('');
   const autoGeneradoRef = useRef<string>('');
 
@@ -200,16 +200,16 @@ export default function Home() {
         </div>
       )}
 
-      {resultado?.success && (archivosPendientes ?? []).length > 0 && (
+      {resultado?.success && archivosPendientes.length > 0 && (
         <div className="card border-green-200 bg-green-50">
           <h3 className="font-semibold text-green-800 mb-2">
-            {resultado.totalReportes} registros encontrados en {(archivosPendientes ?? []).length} fecha(s)
+            {resultado.totalReportes} registros encontrados en {archivosPendientes.length} fecha(s)
           </h3>
           <p className="text-sm text-green-700 mb-4">
             Descargue un archivo por cada dia del recorrido:
           </p>
           <div className="space-y-2">
-            {(archivosPendientes ?? []).map((archivo) => (
+            {archivosPendientes.map((archivo) => (
               <div key={archivo.fecha} className="flex items-center justify-between bg-white p-3 rounded-lg border border-green-200">
                 <div>
                   <span className="font-medium text-gray-800">
