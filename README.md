@@ -63,7 +63,6 @@ La aplicación estará disponible en `http://localhost:3000`
 ## ArcGIS Online - Feature Service
 
 ```
-URL: https://services8.arcgis.com/T9uUJQ5byxgBtGFO/arcgis/rest/services/Servicio_Gestion_Territorial_RONAP/FeatureServer
 Organización: RECOLECTORES ORGÁNICOS DE LA NUEZ AMAZÓNICA PERUANA
 Categoría: Gestión territorial
 Etiquetas: RONAP, QuickCapture, Monitoreo, Concesiones
