@@ -286,7 +286,7 @@ async function generarExcel(socio, reportes, coordenadas, nPatrullaje) {
   // Insertar filas extra si hay más de 5 coordenadas
   if (coordenadas.length > 5) {
     const extrasNecesarias = coordenadas.length - 5;
-    ws.insertRows(36, extrasNecesarias);
+    ws.insertRows(36, Array(extrasNecesarias));
     for (let i = 5; i < coordenadas.length; i++) {
       const newRow = 36 + (i - 5);
       ws.getCell(`A${newRow}`).value = `Punto de Verificación ${i}`;
