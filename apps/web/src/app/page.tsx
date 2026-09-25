@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from 'react';
 import { BuscadorSocio } from '@/components/BuscadorSocio';
 import type { Socio, GenerarReporteResponse } from '@ronap/types';
 
+type ArchivoReporte = NonNullable<GenerarReporteResponse['archivos']>[number];
+
 export default function Home() {
   const [socios, setSocios] = useState<Socio[]>([]);
   const [socioSeleccionado, setSocioSeleccionado] = useState<Socio | null>(null);
@@ -12,7 +14,8 @@ export default function Home() {
   const [cargando, setCargando] = useState(false);
   const [cargandoSocios, setCargandoSocios] = useState(true);
   const [resultado, setResultado] = useState<GenerarReporteResponse | null>(null);
-  const [archivosPendientes, setArchivosPendientes] = useState<NonNullable<GenerarReporteResponse['archivos']>>([]);
+  const [archivos, setArchivos] = useState<ArchivoReporte[]>([]);
+  const [descargados, setDescargados] = useState<Set<string>>(new Set());
   const [error, setError] = useState('');
   const autoGeneradoRef = useRef<string>('');
 
@@ -33,7 +36,8 @@ export default function Home() {
     setCargando(true);
     setError('');
     setResultado(null);
-    setArchivosPendientes([]);
+    setArchivos([]);
+    setDescargados(new Set());
 
     try {
       const body: Record<string, string> = { socio: nombre };
@@ -55,7 +59,7 @@ export default function Home() {
         return;
       }
       setResultado(data);
-      setArchivosPendientes(data.archivos || []);
+      setArchivos(data.archivos || []);
     } catch {
       setError('Error al conectar con el servidor. Verifique que el backend este activo.');
     } finally {
@@ -66,7 +70,8 @@ export default function Home() {
   const handleSelectSocio = (socio: Socio | null) => {
     setSocioSeleccionado(socio);
     setResultado(null);
-    setArchivosPendientes([]);
+    setArchivos([]);
+    setDescargados(new Set());
     setError('');
     if (socio && socio.nombre !== autoGeneradoRef.current) {
       autoGeneradoRef.current = socio.nombre;
@@ -74,7 +79,7 @@ export default function Home() {
     }
   };
 
-  const handleDescargar = (archivo: { archivoBase64: string; nombreArchivo: string; fecha: string }) => {
+  const handleDescargar = (archivo: ArchivoReporte) => {
     const byteCharacters = atob(archivo.archivoBase64);
     const byteArray = new Uint8Array(byteCharacters.length);
     for (let i = 0; i < byteCharacters.length; i++) {
@@ -87,9 +92,16 @@ export default function Home() {
     const a = document.createElement('a');
     a.href = url;
     a.download = archivo.nombreArchivo;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
-    setArchivosPendientes(prev => (prev ?? []).filter(f => f.fecha !== archivo.fecha));
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+
+    setDescargados(prev => {
+      const nuevos = new Set(prev);
+      nuevos.add(archivo.fecha);
+      return nuevos;
+    });
   };
 
   return (
@@ -200,16 +212,16 @@ export default function Home() {
         </div>
       )}
 
-      {resultado?.success && archivosPendientes.length > 0 && (
+      {resultado?.success && archivos.length > 0 && (
         <div className="card border-green-200 bg-green-50">
           <h3 className="font-semibold text-green-800 mb-2">
-            {resultado.totalReportes} registros encontrados en {archivosPendientes.length} fecha(s)
+            {resultado.totalReportes} registros encontrados en {archivos.length} fecha(s)
           </h3>
           <p className="text-sm text-green-700 mb-4">
             Descargue un archivo por cada dia del recorrido:
           </p>
           <div className="space-y-2">
-            {archivosPendientes.map((archivo) => (
+            {archivos.map((archivo) => (
               <div key={archivo.fecha} className="flex items-center justify-between bg-white p-3 rounded-lg border border-green-200">
                 <div>
                   <span className="font-medium text-gray-800">
@@ -219,9 +231,13 @@ export default function Home() {
                 </div>
                 <button
                   onClick={() => handleDescargar(archivo)}
-                  className="btn-primary text-sm px-4 py-1.5"
+                  className={`text-sm px-4 py-1.5 rounded-lg font-semibold transition-colors ${
+                    descargados.has(archivo.fecha)
+                      ? 'bg-white text-ronap-green border border-ronap-green hover:bg-green-50'
+                      : 'btn-primary'
+                  }`}
                 >
-                  Descargar
+                  {descargados.has(archivo.fecha) ? 'Volver a descargar' : 'Descargar'}
                 </button>
               </div>
             ))}

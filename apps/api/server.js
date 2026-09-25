@@ -26,6 +26,30 @@ const DOM_PRIORIDAD = {
   'B': 'Bajo',
 };
 
+// Códigos actuales del dominio Equipos_EPP. También se usa como respaldo
+// cuando ArcGIS no publica los metadatos del dominio.
+const DOM_EQUIPOS_INICIAL = {
+  EPP1: 'GPS',
+  EPP2: 'Smartphone',
+  EPP3: 'Binoculares',
+  EPP4: 'RPAS / Drons',
+  EPP5: 'Brujulas',
+  EPP6: 'Fajas',
+  EPP7: 'Casco',
+  EPP8: 'Ponchos',
+  EPP9: 'Botas de jebe',
+};
+
+let dominioEquiposCache = null;
+
+function normalizarTexto(valor) {
+  return String(valor ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
 app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:3000' }));
 app.use(express.json());
 
@@ -146,6 +170,171 @@ async function consultarArcGIS(nombreSocio, fechaInicio, fechaFin) {
   return data;
 }
 
+// Lee los nombres visibles del dominio Equipos_EPP (por ejemplo, EPP1 => GPS).
+// Así se reconocen automáticamente los productos nuevos o renombrados en ArcGIS.
+async function obtenerDominioEquipos() {
+  if (dominioEquiposCache) return dominioEquiposCache;
+
+  const dominio = { ...DOM_EQUIPOS_INICIAL };
+  if (ARCGIS_URL) {
+    try {
+      const params = new URLSearchParams({ f: 'json' });
+      if (ARCGIS_KEY) params.append('token', ARCGIS_KEY);
+
+      const response = await fetch(`${ARCGIS_URL}/2?${params.toString()}`);
+      if (!response.ok) throw new Error(`ArcGIS HTTP ${response.status}: ${response.statusText}`);
+
+      const data = await response.json();
+      if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+
+      const campoEquipos = (data.fields || []).find(campo => campo.name === 'Equipos');
+      const valores = campoEquipos?.domain?.codedValues || [];
+      for (const valor of valores) {
+        if (valor.code != null && valor.name) {
+          dominio[String(valor.code)] = String(valor.name);
+        }
+      }
+    } catch (error) {
+      console.warn('[ArcGIS] No se pudo leer el dominio Equipos_EPP; se usará el respaldo:', error.message);
+    }
+  }
+
+  dominioEquiposCache = dominio;
+  return dominioEquiposCache;
+}
+
+function decodificarEquipos(valor, dominio) {
+  if (Array.isArray(valor)) {
+    return valor.map(item => decodificarEquipos(item, dominio)).filter(Boolean).join(', ');
+  }
+  if (valor && typeof valor === 'object') {
+    if (valor.code != null) return decodificarEquipos(valor.code, dominio);
+    if (valor.value != null) return decodificarEquipos(valor.value, dominio);
+    return '';
+  }
+  if (valor == null || valor === '') return '';
+
+  const texto = String(valor).trim();
+  if (texto.includes(',')) {
+    return texto
+      .split(',')
+      .map(item => {
+        const limpio = item.trim();
+        return dominio[limpio] || limpio;
+      })
+      .filter(Boolean)
+      .join(', ');
+  }
+  return dominio[texto] || texto;
+}
+
+function normalizarClave(valor) {
+  return normalizarTexto(valor).replace(/[^a-z0-9]+/g, '');
+}
+
+function valorIndicaEvidencia(valor) {
+  if (valor == null || valor === false) return false;
+  if (typeof valor === 'boolean') return valor;
+  if (typeof valor === 'number') return valor > 0;
+  if (Array.isArray(valor)) return valor.some(item => valorIndicaEvidencia(item));
+  if (typeof valor === 'object') {
+    return Object.values(valor).some(item => valorIndicaEvidencia(item));
+  }
+
+  const texto = normalizarTexto(valor);
+  if (!texto) return false;
+  return !['0', 'false', 'no', 'ninguno', 'n/a', 'na', 'null', 'sin evidencia', 'sin evidencia de video'].includes(texto);
+}
+
+function valorIndicaVideo(valor) {
+  if (valor == null) return '';
+
+  const texto = normalizarTexto(
+    typeof valor === 'string' ? valor : JSON.stringify(valor)
+  );
+
+  return /\bvideo(s)?\b|\.mp4\b|\.mov\b|\.avi\b|\.mkv\b|\.webm\b|\.m4v\b|youtube|youtu\.be|vimeo/.test(texto);
+}
+
+function valorTieneEnlaceVideo(valor) {
+  if (valor == null) return false;
+
+  const texto = String(valor);
+  return /https?:\/\/\S*(?:youtube|youtu\.be|vimeo)|https?:\/\/\S+\.(?:mp4|mov|avi|mkv|webm|m4v)(?:[?#]\S*)?/i.test(texto);
+}
+
+function tieneEvidenciaVideo(attributes) {
+  return Object.entries(attributes || {}).some(([clave, valor]) => {
+    if (valorTieneEnlaceVideo(valor)) return true;
+
+    const claveNormalizada = normalizarClave(clave);
+    const esVideo = claveNormalizada.includes('video') || claveNormalizada.includes('videograbado');
+    const esEvidencia = claveNormalizada.includes('evidenc')
+      || ['adjunto', 'adjuntos', 'archivo', 'archivos', 'mediosprobatorios'].includes(claveNormalizada);
+
+    return valorIndicaEvidencia(valor)
+      && (esVideo || (esEvidencia && valorIndicaVideo(valor)));
+  });
+}
+
+function esAdjuntoVideo(adjunto) {
+  const contentType = normalizarTexto(adjunto.contentType || adjunto.tipo || '');
+  if (contentType.startsWith('video/')) return true;
+
+  const nombre = String(adjunto.name || adjunto.fileName || adjunto.url || '');
+  return valorIndicaVideo(nombre);
+}
+
+async function consultarIdsConVideosAdjuntos(features) {
+  const ids = [...new Set(features
+    .map(feature => feature.attributes?.OBJECTID)
+    .filter(id => id != null)
+    .map(String))];
+
+  const idsConVideo = new Set();
+  const LOTE = 100;
+
+  for (let inicio = 0; inicio < ids.length; inicio += LOTE) {
+    const lote = ids.slice(inicio, inicio + LOTE);
+    const params = new URLSearchParams({ objectIds: lote.join(','), f: 'json' });
+    if (ARCGIS_KEY) params.append('token', ARCGIS_KEY);
+
+    try {
+      const response = await fetch(`${ARCGIS_URL}/2/queryAttachments?${params.toString()}`);
+      if (!response.ok) throw new Error(`ArcGIS HTTP ${response.status}: ${response.statusText}`);
+
+      const data = await response.json();
+      if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+
+      const featuresAdjunto = Array.isArray(data.features) ? data.features : [];
+      const gruposAdjunto = Array.isArray(data.attachmentGroups) ? data.attachmentGroups : [];
+
+      for (const feature of featuresAdjunto) {
+        const adjunto = feature.attributes || feature;
+        if (!esAdjuntoVideo(adjunto)) continue;
+        const objectId = adjunto.OBJECTID ?? adjunto.objectId ?? adjunto.objectid;
+        if (objectId != null) idsConVideo.add(String(objectId));
+      }
+
+      for (const grupo of gruposAdjunto) {
+        const objectId = grupo.parentObjectId ?? grupo.objectId ?? grupo.objectid;
+        const adjuntos = Array.isArray(grupo.attachmentInfos)
+          ? grupo.attachmentInfos
+          : (Array.isArray(grupo.attachments) ? grupo.attachments : []);
+
+        if (objectId != null && adjuntos.some(esAdjuntoVideo)) {
+          idsConVideo.add(String(objectId));
+        }
+      }
+    } catch (error) {
+      // Un fallo consultando adjuntos no debe impedir generar el Excel.
+      console.warn('[ArcGIS] No se pudieron consultar adjuntos:', error.message);
+    }
+  }
+
+  return idsConVideo;
+}
+
 // ============================================================
 // UTIL: Convertir lat/lng (WGS84) a UTM Zona 19S
 // ============================================================
@@ -184,14 +373,14 @@ function latLngToUtm19S(lat, lng) {
 // Mapeo de palabras clave del campo Equipos → casillas del Excel
 const EPP_MAP = {
   gps: 'A22', cps: 'A22',
-  brujula: 'D22', 'brújula': 'D22',
-  smartphone: 'A23', celular: 'A23', telefono: 'A23', teléfono: 'A23',
-  binocular: 'A24', binoculares: 'A24',
+  brujul: 'D22',
+  smartphone: 'A23', celular: 'A23', telefono: 'A23', movil: 'A23',
+  binocular: 'A24',
   dron: 'A25', rpas: 'A25', uav: 'A25',
-  faja: 'B26_Fajas', fajas: 'B26_Fajas',
-  casco: 'B26_Casco', cascos: 'B26_Casco',
-  poncho: 'B26_Poncho', ponchos: 'B26_Poncho',
-  bota: 'B26_Botas', botas: 'B26_Botas', jebe: 'B26_Botas',
+  faj: 'B26_Fajas',
+  casc: 'B26_Casco',
+  ponch: 'B26_Poncho',
+  bota: 'B26_Botas', jebe: 'B26_Botas',
 };
 
 function parsearEquipos(textoEquipos) {
@@ -200,27 +389,60 @@ function parsearEquipos(textoEquipos) {
 
   if (!textoEquipos) return { marcas, otros };
 
-  const items = textoEquipos.split(',').map(s => s.trim().toLowerCase());
+  const items = textoEquipos
+    .split(/[,;|\n]+/)
+    .map(item => item.trim())
+    .filter(Boolean);
+
   for (const item of items) {
-    if (!item) continue;
+    const itemOriginal = item;
+    const codigo = item.toUpperCase();
+    const itemDecodificado = DOM_EQUIPOS_INICIAL[codigo] || itemOriginal;
+    const normalizado = normalizarTexto(itemDecodificado);
     let encontrado = false;
-    for (const [kw, cell] of Object.entries(EPP_MAP)) {
-      if (item.includes(kw)) {
-        if (cell.startsWith('B26_')) {
-          const eppKey = cell.split('_')[1];
-          marcas.B26[eppKey] = true;
-        } else {
-          marcas[cell] = true;
-        }
-        encontrado = true;
-        break;
+
+    for (const [keyword, celda] of Object.entries(EPP_MAP)) {
+      if (!normalizado.includes(keyword)) continue;
+
+      if (celda.startsWith('B26_')) {
+        marcas.B26[celda.split('_')[1]] = true;
+      } else {
+        marcas[celda] = true;
       }
+      encontrado = true;
+      break;
     }
-    if (!encontrado && item.length > 1) {
-      otros.push(item);
+
+    if (!encontrado && normalizado.length > 1) {
+      otros.push(itemDecodificado);
     }
   }
-  return { marcas, otros };
+
+  const otrosUnicos = [...new Map(otros.map(item => [normalizarTexto(item), item])).values()];
+  return { marcas, otros: otrosUnicos };
+}
+
+// ExcelJS 4.4.0 altera los rangos combinados al insertar filas. Este helper
+// conserva los merges y los desplaza de forma segura, evitando que Videos,
+// Fotografías o las demás casillas terminen sobrescritas.
+function insertarFilasPreservandoMerges(ws, posicion, cantidad) {
+  const ExcelJSCell = ws.getCell(1, 1).constructor;
+  const mergesOriginales = Object.values(ws._merges).map(merge => ({ ...merge.model }));
+  const mergeOriginal = ExcelJSCell.prototype.merge;
+
+  ExcelJSCell.prototype.merge = function () {};
+  try {
+    ws.insertRows(posicion, Array(cantidad), 'i');
+  } finally {
+    ExcelJSCell.prototype.merge = mergeOriginal;
+  }
+
+  ws._merges = {};
+  for (const merge of mergesOriginales) {
+    const top = merge.top >= posicion ? merge.top + cantidad : merge.top;
+    const bottom = merge.bottom >= posicion ? merge.bottom + cantidad : merge.bottom;
+    ws.mergeCells(top, merge.left, bottom, merge.right);
+  }
 }
 
 async function generarExcel(socio, reportes, coordenadas, nPatrullaje) {
@@ -284,16 +506,15 @@ async function generarExcel(socio, reportes, coordenadas, nPatrullaje) {
 
   // ── SECCIÓN 4: COORDENADAS UTM ──
   // Insertar filas extra si hay más de 5 coordenadas
-  if (coordenadas.length > 5) {
-    const extrasNecesarias = coordenadas.length - 5;
-    ws.insertRows(36, Array(extrasNecesarias));
+  const filasInsertadas = Math.max(0, coordenadas.length - 5);
+  if (filasInsertadas > 0) {
+    insertarFilasPreservandoMerges(ws, 36, filasInsertadas);
     for (let i = 5; i < coordenadas.length; i++) {
       const newRow = 36 + (i - 5);
       ws.getCell(`A${newRow}`).value = `Punto de Verificación ${i}`;
     }
   }
 
-  const maxCoord = Math.min(coordenadas.length, 5 + (coordenadas.length > 5 ? coordenadas.length - 5 : 0));
   for (let i = 0; i < coordenadas.length; i++) {
     const p = coordenadas[i];
     const utm = latLngToUtm19S(p.lat, p.lng);
@@ -312,7 +533,7 @@ async function generarExcel(socio, reportes, coordenadas, nPatrullaje) {
     return linea;
   });
   if (lineasDesc.length > 0) {
-    const descCell = ws.getCell('B39');
+    const descCell = ws.getCell(`B${39 + filasInsertadas}`);
     descCell.value = lineasDesc.join('\n');
     descCell.alignment = { wrapText: true, vertical: 'top' };
   }
@@ -320,7 +541,7 @@ async function generarExcel(socio, reportes, coordenadas, nPatrullaje) {
   // 5.2 Autores (fila 43)
   const autores = reportes.filter(r => r.autores).map(r => r.autores);
   if (autores.length > 0) {
-    const autoresCell = ws.getCell('B43');
+    const autoresCell = ws.getCell(`B${43 + filasInsertadas}`);
     autoresCell.value = [...new Set(autores)].join('\n');
     autoresCell.alignment = { wrapText: true, vertical: 'top' };
   }
@@ -328,15 +549,18 @@ async function generarExcel(socio, reportes, coordenadas, nPatrullaje) {
   // 5.3 Observaciones adicionales (fila 47)
   const observaciones = reportes.filter(r => r.observadores).map(r => r.observadores);
   if (observaciones.length > 0) {
-    const obsCell = ws.getCell('B47');
+    const obsCell = ws.getCell(`B${47 + filasInsertadas}`);
     obsCell.value = [...new Set(observaciones)].join('\n');
     obsCell.alignment = { wrapText: true, vertical: 'top' };
   }
 
   // Medios probatorios
+  if (reportes.some(r => r.evidenciasVideos)) {
+    ws.getCell(`D${52 + filasInsertadas}`).value = '[x] Videos';
+  }
   if (coordenadas.length > 0) {
-    ws.getCell('B52').value = '[x] Fotografías';
-    ws.getCell('E52').value = '[x] Mapa Satelital / Track GPS';
+    ws.getCell(`B${52 + filasInsertadas}`).value = '[x] Fotografías';
+    ws.getCell(`E${52 + filasInsertadas}`).value = '[x] Mapa Satelital / Track GPS';
   }
 
   const arrayBuffer = await workbook.xlsx.writeBuffer();
@@ -373,9 +597,15 @@ app.post('/api/generar-reporte', async (req, res) => {
       });
     }
 
+    const [dominioEquipos, idsConVideosAdjuntos] = await Promise.all([
+      obtenerDominioEquipos(),
+      consultarIdsConVideosAdjuntos(features),
+    ]);
+
     // 3. Mapear campos de ArcGIS → nombres de la vista + dominios
     const reportes = features.map((f, i) => {
       const a = f.attributes;
+      const objectId = a.OBJECTID;
       const fechaHora = a.Fecha_Hora;
       let fechaISO = '';
       let fechaStr = '';
@@ -393,7 +623,10 @@ app.post('/api/generar-reporte', async (req, res) => {
         descripcion: a.Descripcion || '',
         prioridad: DOM_PRIORIDAD[a.Prioridad] || a.Prioridad || '',
         responsable: a.Responsable || '',
-        equipos: a.Equipos || '',
+        equipos: decodificarEquipos(a.Equipos, dominioEquipos),
+        evidenciasVideos: objectId != null && idsConVideosAdjuntos.has(String(objectId))
+          ? true
+          : tieneEvidenciaVideo(a),
         autores: a.Autores || '',
         observadores: a.Observadores || '',
         latitud: f.geometry?.y || null,
