@@ -528,14 +528,20 @@ async function generarExcel(socio, reportes, coordenadas, nPatrullaje) {
   if (marcas.A24) ws.getCell('A24').value = '[ x ] Binoculares:';
   if (marcas.A25) ws.getCell('A25').value = '[ x ] RPAS / Dron:';
 
-  const eppLinea = [];
-  if (marcas.B26.Fajas) eppLinea.push('[x] Fajas');
-  if (marcas.B26.Casco) eppLinea.push('[x] Casco');
-  if (marcas.B26.Poncho) eppLinea.push('[x] Poncho');
-  if (marcas.B26.Botas) eppLinea.push('[x] Botas de jebe');
-  if (eppLinea.length > 0) {
-    ws.getCell('B26').value = eppLinea.join('    ');
-  }
+  // App / Soft: valor fijo. Toda la ficha se levanta desde el móvil con
+  // QuickCapture, así que se imprime siempre, igual que los datos satelitales.
+  ws.getCell('C23').value = 'App / Soft:';
+  ws.getCell('D23').value = 'QuickCapture';
+
+  // Se escribe la línea completa siempre: los EPP no usados se dejan tal como
+  // están en la plantilla (`[  ]`) para que impriman junto a los marcados.
+  const marcaEpp = (activo, texto) => (activo ? `[x] ${texto}` : `[  ] ${texto}`);
+  ws.getCell('B26').value = [
+    marcaEpp(marcas.B26.Fajas, 'Fajas'),
+    marcaEpp(marcas.B26.Casco, 'Casco'),
+    marcaEpp(marcas.B26.Poncho, 'Poncho'),
+    marcaEpp(marcas.B26.Botas, 'Botas de jebe'),
+  ].join('    ');
   if (otros.length > 0) {
     ws.getCell('A27').value = 'Otro EPP: ' + otros.join(', ');
   }
