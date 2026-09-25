@@ -215,7 +215,7 @@ export default function Home() {
       {resultado?.success && archivos.length > 0 && (
         <div className="card border-green-200 bg-green-50">
           <h3 className="font-semibold text-green-800 mb-2">
-            {resultado.totalReportes} registros encontrados en {archivos.length} fecha(s)
+            {resultado.totalPuntos} puntos encontrados en {archivos.length} fecha(s)
           </h3>
           <p className="text-sm text-green-700 mb-4">
             Descargue un archivo por cada dia del recorrido:
@@ -227,7 +227,7 @@ export default function Home() {
                   <span className="font-medium text-gray-800">
                     {new Date(archivo.fecha + 'T12:00:00').toLocaleDateString('es-PE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
                   </span>
-                  <span className="text-sm text-gray-500 ml-2">({archivo.totalReportes} registros)</span>
+                  <span className="text-sm text-gray-500 ml-2">({archivo.totalPuntos} puntos)</span>
                 </div>
                 <button
                   onClick={() => handleDescargar(archivo)}

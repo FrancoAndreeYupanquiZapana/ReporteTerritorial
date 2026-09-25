@@ -458,6 +458,16 @@ function esRegistroEpp(reporte) {
   return Boolean(reporte.equipos) && !reporte.tipoAlerta;
 }
 
+// Un "punto" es una ocurrencia con coordenadas. La tabla UTM y la numeración
+// (1), (2), (3)... de las secciones 5.1/5.2/5.3 usan esta misma función, para
+// que (n) apunte siempre a la fila n de la tabla y los tres campos queden
+// vinculados al mismo punto.
+function esPuntoValido(reporte) {
+  return !esRegistroEpp(reporte)
+    && Number.isFinite(reporte.latitud)
+    && Number.isFinite(reporte.longitud);
+}
+
 // ExcelJS 4.4.0 altera los rangos combinados al insertar filas. Este helper
 // conserva los merges y los desplaza de forma segura, evitando que Videos,
 // Fotografías o las demás casillas terminen sobrescritas.
@@ -528,10 +538,9 @@ async function generarExcel(socio, reportes, coordenadas, nPatrullaje) {
   if (marcas.A24) ws.getCell('A24').value = '[ x ] Binoculares:';
   if (marcas.A25) ws.getCell('A25').value = '[ x ] RPAS / Dron:';
 
-  // App / Soft: valor fijo. Toda la ficha se levanta desde el móvil con
+  // App/Soft: valor fijo. Toda la ficha se levanta desde el móvil con
   // QuickCapture, así que se imprime siempre, igual que los datos satelitales.
-  ws.getCell('C23').value = 'App / Soft:';
-  ws.getCell('D23').value = 'QuickCapture';
+  ws.getCell('C23').value = 'App/Soft: QuickCapture';
 
   // Se escribe la línea completa siempre: los EPP no usados se dejan tal como
   // están en la plantilla (`[  ]`) para que impriman junto a los marcados.
@@ -546,9 +555,15 @@ async function generarExcel(socio, reportes, coordenadas, nPatrullaje) {
     ws.getCell('A27').value = 'Otro EPP: ' + otros.join(', ');
   }
 
-  const reportesOcurrencia = reportes.filter(r => !esRegistroEpp(r));
-
   // ── SECCIÓN 4: COORDENADAS UTM ──
+  // Los puntos se numeran una sola vez y ese número se reutiliza en 5.1, 5.2
+  // y 5.3, de modo que (n) siempre es la fila n de esta tabla. Si un punto no
+  // tiene autor u observación, su número no aparece en ese bloque, pero los
+  // siguientes NO se corren: la vinculación entre los 3 apartados se mantiene.
+  const puntosNumerados = reportes
+    .filter(esPuntoValido)
+    .map((r, i) => ({ r, punto: i + 1 }));
+
   // Insertar filas extra si hay más de 5 coordenadas
   const filasInsertadas = Math.max(0, coordenadas.length - 5);
   if (filasInsertadas > 0) {
@@ -570,14 +585,16 @@ async function generarExcel(socio, reportes, coordenadas, nPatrullaje) {
   }
 
   // ── SECCIÓN 5: DESCRIPCIÓN DEL HECHO ──
-  const lineasDesc = reportesOcurrencia.map(r => {
-    const detalle = [r.tipoAlerta, r.descripcion].filter(Boolean).join(': ');
-    if (!detalle) return '';
+  // Reutiliza `puntosNumerados` de la sección 4 para que (1) en 5.1 sea el
+  // mismo punto que (1) en 5.2, (1) en 5.3 y la fila 31 de la tabla UTM.
+  const conPrefijo = (r, punto) => `(${punto}) [${r.fecha}] `;
 
-    let linea = `[${r.fecha}] ${detalle}`;
-    if (r.prioridad) linea += ` (${r.prioridad})`;
-    return linea;
-  }).filter(Boolean);
+  const lineasDesc = puntosNumerados
+    .map(({ r, punto }) => {
+      const detalle = [r.tipoAlerta, r.descripcion].filter(Boolean).join(': ');
+      return detalle ? conPrefijo(r, punto) + detalle : '';
+    })
+    .filter(Boolean);
   if (lineasDesc.length > 0) {
     const descCell = ws.getCell(`B${39 + filasInsertadas}`);
     descCell.value = lineasDesc.join('\n');
@@ -585,18 +602,22 @@ async function generarExcel(socio, reportes, coordenadas, nPatrullaje) {
   }
 
   // 5.2 Autores (fila 43)
-  const autores = reportesOcurrencia.filter(r => r.autores).map(r => r.autores);
-  if (autores.length > 0) {
+  const lineasAutores = puntosNumerados
+    .filter(({ r }) => r.autores)
+    .map(({ r, punto }) => conPrefijo(r, punto) + r.autores);
+  if (lineasAutores.length > 0) {
     const autoresCell = ws.getCell(`B${43 + filasInsertadas}`);
-    autoresCell.value = [...new Set(autores)].join('\n');
+    autoresCell.value = lineasAutores.join('\n');
     autoresCell.alignment = { wrapText: true, vertical: 'top' };
   }
 
   // 5.3 Observaciones adicionales (fila 47)
-  const observaciones = reportesOcurrencia.filter(r => r.observadores).map(r => r.observadores);
-  if (observaciones.length > 0) {
+  const lineasObs = puntosNumerados
+    .filter(({ r }) => r.observadores)
+    .map(({ r, punto }) => conPrefijo(r, punto) + r.observadores);
+  if (lineasObs.length > 0) {
     const obsCell = ws.getCell(`B${47 + filasInsertadas}`);
-    obsCell.value = [...new Set(observaciones)].join('\n');
+    obsCell.value = lineasObs.join('\n');
     obsCell.alignment = { wrapText: true, vertical: 'top' };
   }
 
@@ -675,8 +696,8 @@ app.post('/api/generar-reporte', async (req, res) => {
           : tieneEvidenciaVideo(a),
         autores: a.Autores || '',
         observadores: a.Observadores || '',
-        latitud: f.geometry?.y || null,
-        longitud: f.geometry?.x || null,
+        latitud: f.geometry?.y ?? null,
+        longitud: f.geometry?.x ?? null,
       };
     });
 
@@ -695,7 +716,7 @@ app.post('/api/generar-reporte', async (req, res) => {
       const fecha = fechas[idx];
       const grupoReportes = grupos[fecha];
       const coordsGrupo = grupoReportes
-        .filter(r => !esRegistroEpp(r) && Number.isFinite(r.latitud) && Number.isFinite(r.longitud))
+        .filter(esPuntoValido)
         .map(r => ({ lat: r.latitud, lng: r.longitud }));
 
       const buffer = await generarExcel(socioData, grupoReportes, coordsGrupo, idx + 1);
@@ -703,17 +724,20 @@ app.post('/api/generar-reporte', async (req, res) => {
         fecha,
         fechaStr: grupoReportes[0].fecha,
         totalReportes: grupoReportes.length,
+        totalPuntos: coordsGrupo.length,
         archivoBase64: buffer.toString('base64'),
         nombreArchivo: `Reporte_${socio.replace(/\s+/g, '_')}_${fecha}.xlsx`,
       });
     }
 
-    console.log(`[API] Total: ${reportes.length} registros en ${archivos.length} fechas`);
+    const totalPuntos = archivos.reduce((suma, a) => suma + a.totalPuntos, 0);
+    console.log(`[API] Total: ${reportes.length} registros (${totalPuntos} puntos) en ${archivos.length} fechas`);
 
     res.json({
       success: true,
-      message: `${reportes.length} registros en ${archivos.length} fecha(s)`,
+      message: `${totalPuntos} puntos en ${archivos.length} fecha(s)`,
       totalReportes: reportes.length,
+      totalPuntos,
       archivos,
     });
 

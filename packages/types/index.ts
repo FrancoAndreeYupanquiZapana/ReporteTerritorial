@@ -37,11 +37,15 @@ export interface GenerarReporteRequest {
 export interface GenerarReporteResponse {
   success: boolean;
   message: string;
+  /** Total de registros crudos de ArcGIS, incluidos los de EPP. */
   totalReportes?: number;
+  /** Total de puntos (ocurrencias con coordenadas), sin EPP. */
+  totalPuntos?: number;
   archivos?: Array<{
     fecha: string;
     fechaStr: string;
     totalReportes: number;
+    totalPuntos: number;
     archivoBase64: string;
     nombreArchivo: string;
   }>;
