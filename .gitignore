@@ -4,6 +4,7 @@ dist/
 docs/
 .env
 .env.local
+.env.example
 .env.production
 *.log
 .DS_Store

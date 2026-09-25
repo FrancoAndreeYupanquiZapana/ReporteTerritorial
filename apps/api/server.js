@@ -50,7 +50,36 @@ function normalizarTexto(valor) {
     .trim();
 }
 
-app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:3000' }));
+const CORS_ORIGINS_POR_DEFECTO = [
+  'http://localhost:3000',
+  'https://reporte-territorial-web.vercel.app',
+];
+
+const corsOrigins = new Set(
+  (process.env.CORS_ORIGIN || CORS_ORIGINS_POR_DEFECTO.join(','))
+    .split(',')
+    .map(origin => origin.trim())
+    .filter(Boolean)
+);
+
+const permitirPreviewsDeVercel = process.env.CORS_ALLOW_VERCEL_PREVIEWS !== 'false';
+const previewsDeEsteProyecto = /^https:\/\/reporte-territorial(?:-[a-z0-9-]+)?\.vercel\.app$/i;
+
+app.use(cors({
+  origin(origin, callback) {
+    // Las solicitudes sin Origin (por ejemplo, health checks con curl) no
+    // necesitan CORS. Los navegadores sí deben enviar un Origin permitido.
+    if (!origin || corsOrigins.has('*') || corsOrigins.has(origin)) {
+      return callback(null, true);
+    }
+
+    if (permitirPreviewsDeVercel && previewsDeEsteProyecto.test(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(null, false);
+  },
+}));
 app.use(express.json());
 
 // ============================================================
