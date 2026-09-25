@@ -451,6 +451,13 @@ function parsearEquipos(textoEquipos) {
   return { marcas, otros: otrosUnicos };
 }
 
+// Las cargas de EPP llegan como registros independientes (tienen Equipos pero
+// no Ocurrencia). No son puntos de la ocurrencia ni deben generar líneas
+// vacías en la descripción ni coordenadas referenciales.
+function esRegistroEpp(reporte) {
+  return Boolean(reporte.equipos) && !reporte.tipoAlerta;
+}
+
 // ExcelJS 4.4.0 altera los rangos combinados al insertar filas. Este helper
 // conserva los merges y los desplaza de forma segura, evitando que Videos,
 // Fotografías o las demás casillas terminen sobrescritas.
@@ -533,6 +540,8 @@ async function generarExcel(socio, reportes, coordenadas, nPatrullaje) {
     ws.getCell('A27').value = 'Otro EPP: ' + otros.join(', ');
   }
 
+  const reportesOcurrencia = reportes.filter(r => !esRegistroEpp(r));
+
   // ── SECCIÓN 4: COORDENADAS UTM ──
   // Insertar filas extra si hay más de 5 coordenadas
   const filasInsertadas = Math.max(0, coordenadas.length - 5);
@@ -555,12 +564,14 @@ async function generarExcel(socio, reportes, coordenadas, nPatrullaje) {
   }
 
   // ── SECCIÓN 5: DESCRIPCIÓN DEL HECHO ──
-  const lineasDesc = reportes.map(r => {
-    let linea = `[${r.fecha}] ${r.tipoAlerta}`;
-    if (r.descripcion) linea += `: ${r.descripcion}`;
+  const lineasDesc = reportesOcurrencia.map(r => {
+    const detalle = [r.tipoAlerta, r.descripcion].filter(Boolean).join(': ');
+    if (!detalle) return '';
+
+    let linea = `[${r.fecha}] ${detalle}`;
     if (r.prioridad) linea += ` (${r.prioridad})`;
     return linea;
-  });
+  }).filter(Boolean);
   if (lineasDesc.length > 0) {
     const descCell = ws.getCell(`B${39 + filasInsertadas}`);
     descCell.value = lineasDesc.join('\n');
@@ -568,7 +579,7 @@ async function generarExcel(socio, reportes, coordenadas, nPatrullaje) {
   }
 
   // 5.2 Autores (fila 43)
-  const autores = reportes.filter(r => r.autores).map(r => r.autores);
+  const autores = reportesOcurrencia.filter(r => r.autores).map(r => r.autores);
   if (autores.length > 0) {
     const autoresCell = ws.getCell(`B${43 + filasInsertadas}`);
     autoresCell.value = [...new Set(autores)].join('\n');
@@ -576,7 +587,7 @@ async function generarExcel(socio, reportes, coordenadas, nPatrullaje) {
   }
 
   // 5.3 Observaciones adicionales (fila 47)
-  const observaciones = reportes.filter(r => r.observadores).map(r => r.observadores);
+  const observaciones = reportesOcurrencia.filter(r => r.observadores).map(r => r.observadores);
   if (observaciones.length > 0) {
     const obsCell = ws.getCell(`B${47 + filasInsertadas}`);
     obsCell.value = [...new Set(observaciones)].join('\n');
@@ -678,7 +689,7 @@ app.post('/api/generar-reporte', async (req, res) => {
       const fecha = fechas[idx];
       const grupoReportes = grupos[fecha];
       const coordsGrupo = grupoReportes
-        .filter(r => r.latitud && r.longitud)
+        .filter(r => !esRegistroEpp(r) && Number.isFinite(r.latitud) && Number.isFinite(r.longitud))
         .map(r => ({ lat: r.latitud, lng: r.longitud }));
 
       const buffer = await generarExcel(socioData, grupoReportes, coordsGrupo, idx + 1);
